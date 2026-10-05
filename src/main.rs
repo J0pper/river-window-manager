@@ -5,7 +5,7 @@ use wayland_client::{ Connection, protocol::{wl_display::WlDisplay, wl_registry}
 
 
 use crate::river::{
-    river_node_v1::RiverNodeV1, river_output_v1::RiverOutputV1, river_pointer_binding_v1::RiverPointerBindingV1, river_seat_v1::{Modifiers, RiverSeatV1}, river_window_manager_v1::RiverWindowManagerV1, river_window_v1::{DecorationHint, Edges, RiverWindowV1}, river_xkb_binding_v1::RiverXkbBindingV1, river_xkb_bindings_v1::RiverXkbBindingsV1,
+    river_node_v1::RiverNodeV1, river_output_v1::RiverOutputV1, river_pointer_binding_v1::RiverPointerBindingV1, river_seat_v1::{Modifiers, RiverSeatV1}, river_window_manager_v1::RiverWindowManagerV1, river_window_v1::{Edges, RiverWindowV1}, river_xkb_binding_v1::RiverXkbBindingV1, river_xkb_bindings_v1::RiverXkbBindingsV1,
 };
 
 mod river {
@@ -678,7 +678,10 @@ impl Dispatch<RiverWindowManagerV1, ()> for AppData {
                 eprintln!("Error: Another WM is already running");
                 std::process::exit(1);
             },
-            Event::Finished => std::process::exit(0),
+            Event::Finished => {
+
+                std::process::exit(0);
+            },
             Event::ManageStart => {
                 let river_xkb = state
                     .river_xkb
@@ -748,6 +751,9 @@ impl Dispatch<RiverWindowV1, ()> for AppData {
             Event::UnreliablePid { unreliable_pid: _ } => {},
             Event::PresentationHint { .. } => {},
             Event::Identifier { .. } => {},
+            Event::CaptureSessions { count: _ } => {},
+            Event::TouchMoveRequested { seat: _, touch_point: _ } => {},
+            Event::TouchResizeRequested { seat: _, touch_point: _, edges: _ } => {},
         }
     }
 }
@@ -775,6 +781,7 @@ impl Dispatch<RiverOutputV1, ()> for AppData {
                 width: _,
                 height: _,
             } => {},
+            Event::CaptureSessions { count: _ } => {},
         }
     }
 }
@@ -802,6 +809,9 @@ impl Dispatch<RiverSeatV1, ()> for AppData {
             Event::OpDelta { dx, dy } => (seat.op_dx, seat.op_dy) = (dx, dy),
             Event::OpRelease => seat.op_release = true,
             Event::PointerPosition { x: _, y: _ } => {},
+            Event::OpDeltaTouch { touch_point: _, dx: _, dy: _ } => {},
+            Event::OpCancelTouch { touch_point: _ } => {},
+            Event::OpReleaseTouch { touch_point: _ } => {},
         }
     }
 }
