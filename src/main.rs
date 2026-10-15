@@ -5,7 +5,7 @@ use wayland_client::{ Connection, protocol::{wl_display::WlDisplay, wl_registry}
 
 
 use crate::river::{
-    river_node_v1::RiverNodeV1, river_output_v1::RiverOutputV1, river_pointer_binding_v1::RiverPointerBindingV1, river_seat_v1::{Modifiers, RiverSeatV1}, river_window_manager_v1::RiverWindowManagerV1, river_window_v1::{Edges, RiverWindowV1}, river_xkb_binding_v1::RiverXkbBindingV1, river_xkb_bindings_v1::RiverXkbBindingsV1,
+    river_node_v1::RiverNodeV1, river_output_v1::RiverOutputV1, river_pointer_binding_v1::RiverPointerBindingV1, river_seat_v1::{Modifiers, RiverSeatV1}, river_window_manager_v1::RiverWindowManagerV1, river_window_v1::{DecorationHint, Edges, RiverWindowV1}, river_xkb_binding_v1::RiverXkbBindingV1, river_xkb_bindings_v1::RiverXkbBindingsV1,
 };
 
 mod river {
@@ -89,6 +89,26 @@ struct Window {
     pointer_move_requested: Option<RiverSeatV1>,
     pointer_resize_requested: Option<RiverSeatV1>,
     pointer_resize_requested_edges: Edges,
+    pending_manage: PendingManage,
+    pending_render: PendingRender,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PendingManage {
+    width: Option<i32>,
+    height: Option<i32>,
+    fullscreen: bool,
+    exit_fullscreen: bool,
+    maximize: bool,
+    unmaximize: bool,
+    decoration_hint: DecorationHint,
+}
+
+#[derive(Debug)]
+struct PendingRender {
+    x: Option<i32>,
+    y: Option<i32>,
+
 }
 
 // A logical output. Represents the displayable area of the screen.
@@ -319,6 +339,21 @@ impl WindowManager {
                     .expect("Seat not found");
                 seat.pointer_resize(window, window.pointer_resize_requested_edges); // call pointer_move function on seat come back
             }
+
+            let pending = window.pending_manage;
+
+            if let (Some(width), Some(height)) = (pending.width, pending.height)  {
+                window.set_dimensions(width, height);
+            }
+
+            match pending.decoration_hint {
+                DecorationHint::OnlySupportsCsd | DecorationHint::PrefersCsd => {
+                    window.proxy.use_csd();
+                },
+                DecorationHint::PrefersSsd | DecorationHint::NoPreference => {
+                    window.proxy.use_ssd();
+                },
+            }
         }
     }
 
@@ -381,6 +416,19 @@ impl Window {
             pointer_move_requested: None,
             pointer_resize_requested: None,
             pointer_resize_requested_edges: Edges::None,
+            pending_manage: PendingManage {
+                width: None,
+                height: None,
+                fullscreen: false,
+                exit_fullscreen: false,
+                maximize: false,
+                unmaximize: false,
+                decoration_hint: DecorationHint::NoPreference,
+            },
+            pending_render: PendingRender {
+                x: None,
+                y: None,
+            }
         }
     }
 
@@ -389,6 +437,10 @@ impl Window {
         self.node.set_position(x, y); // set the absolute position of the node in the compositor's logical coordinate space
         self.x = x;
         self.y = y;
+    }
+
+    fn set_dimensions(&mut self, width: i32, height: i32) {
+        self.proxy.propose_dimensions(width, height);
     }
 }
 
@@ -756,7 +808,12 @@ impl Dispatch<RiverWindowV1, ()> for AppData {
             Event::AppId { app_id: _ } => {},
             Event::Title { title: _ } => {},
             Event::Parent { parent: _ } => {},
-            Event::DecorationHint { hint: _ } => {},
+            Event::DecorationHint { hint } => {
+                window.pending_manage.decoration_hint = match hint.into_result() {
+                    Ok(val) => val,
+                    Err(_) => DecorationHint::NoPreference
+                }
+            },
             Event::PointerMoveRequested { seat } => window.pointer_move_requested = Some(seat),
             Event::PointerResizeRequested { seat, edges } => {
                 window.pointer_resize_requested = Some(seat);
