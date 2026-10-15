@@ -72,6 +72,7 @@ struct AppData {
 struct WindowManager {
     windows: VecDeque<Window>,
     outputs: HashMap<ObjectId, Output>,
+    focused_output: Option<ObjectId>,
     seats: HashMap<ObjectId, Seat>,
 }
 
@@ -96,6 +97,10 @@ struct Window {
 struct Output {
     proxy: RiverOutputV1, // proxy to communicate with object. See WindowManager, remove_outputs().
     removed: bool,        // bool to decide whether output is active or removed.
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
 }
 
 // This object represents a single user's collection of input devices.
@@ -383,6 +388,10 @@ impl Output {
         Self {
             proxy,
             removed: false,
+            x: 0,
+            y: 0,
+            width: 0,
+            height: 0
         }
     }
 }
@@ -694,6 +703,7 @@ impl Dispatch<RiverWindowManagerV1, ()> for AppData {
             Event::SessionUnlocked => {},
             Event::Window { id } => state.wm.windows.push_back(Window::new(id, qh)),
             Event::Output { id } => {
+                state.wm.focused_output = Some(id.id());
                 state.wm.outputs.insert(id.id(), Output::new(id));
             },
             Event::Seat { id } => {
@@ -776,11 +786,20 @@ impl Dispatch<RiverOutputV1, ()> for AppData {
         match event {
             Event::Removed => output.removed = true,
             Event::WlOutput { name: _ } => {},
-            Event::Position { x: _, y: _ } => {},
+            Event::Position {
+                x,
+                y,
+            } => {
+                (output.x, output.y) = (x, y);
+                eprintln!("x: {}, y: {}", x, y);
+            },
             Event::Dimensions { 
-                width: _,
-                height: _,
-            } => {},
+                width,
+                height,
+            } => {
+                (output.width, output.height) = (width, height);
+                eprintln!("width: {}, height: {}", width, height);
+            },
             Event::CaptureSessions { count: _ } => {},
         }
     }
