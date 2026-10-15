@@ -353,9 +353,20 @@ impl WindowManager {
 impl Window {
     // Spawn a new window.
     // The proxy and queuehandle is passed in
-    fn new(proxy: RiverWindowV1, qh: &QueueHandle<AppData>) -> Self {
+    fn new(wm: &WindowManager, proxy: RiverWindowV1, qh: &QueueHandle<AppData>) -> Self {
         // get the node in the renderlist that corresponds to the window.
         let node = proxy.get_node(qh, ()); // make this call only once per window
+
+        let (x, y) = wm.focused_output
+            .as_ref()
+            .and_then(|id| wm.outputs.get(&id))
+            .map_or((0, 0), |output| (output.x, output.y));
+
+        let (width, height) = wm.focused_output
+            .as_ref()
+            .and_then(|id| wm.outputs.get(&id))
+            .map_or((0, 0), |output| (output.width, output.height));
+
 
         // new window object
         Window {
@@ -363,10 +374,10 @@ impl Window {
             node,
             new: true, // window is new before being processed
             closed: false,
-            x: 0,
-            y: 0,
-            width: 0,
-            height: 0,
+            x: x,
+            y: y,
+            width: width,
+            height: height,
             pointer_move_requested: None,
             pointer_resize_requested: None,
             pointer_resize_requested_edges: Edges::None,
@@ -701,7 +712,7 @@ impl Dispatch<RiverWindowManagerV1, ()> for AppData {
             Event::RenderStart => state.wm.handle_render_start(proxy),
             Event::SessionLocked => {},
             Event::SessionUnlocked => {},
-            Event::Window { id } => state.wm.windows.push_back(Window::new(id, qh)),
+            Event::Window { id } => state.wm.windows.push_back(Window::new(&state.wm, id, qh)),
             Event::Output { id } => {
                 state.wm.focused_output = Some(id.id());
                 state.wm.outputs.insert(id.id(), Output::new(id));
