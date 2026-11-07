@@ -3,7 +3,7 @@ use wayland_client::{ Connection, protocol::{wl_display::WlDisplay, wl_registry}
 
 
 use crate::river::{
-    river_node_v1::RiverNodeV1, river_output_v1::RiverOutputV1, river_pointer_binding_v1::RiverPointerBindingV1, river_seat_v1::{RiverSeatV1}, river_window_manager_v1::RiverWindowManagerV1, river_window_v1::{DecorationHint, RiverWindowV1}, river_xkb_binding_v1::RiverXkbBindingV1, river_xkb_bindings_v1::RiverXkbBindingsV1,
+    river_node_v1::RiverNodeV1, river_output_v1::RiverOutputV1, river_pointer_binding_v1::RiverPointerBindingV1, river_seat_v1::{RiverSeatV1}, river_window_manager_v1::RiverWindowManagerV1, river_xkb_binding_v1::RiverXkbBindingV1, river_xkb_bindings_v1::RiverXkbBindingsV1,
 };
 
 
@@ -16,11 +16,10 @@ mod action;
 mod xkb_binding;
 mod pointer_binding;
 mod app_data;
+mod canvas;
+mod canvas_tree;
 
-use output::Output;
 use app_data::AppData;
-use window::Window;
-use seat::Seat;
 
 mod river {
     pub extern crate wayland_client;
@@ -121,143 +120,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for AppData {
     }
 }
 
-impl Dispatch<RiverWindowManagerV1, ()> for AppData {
-    fn event(
-        state: &mut Self,
-        proxy: &RiverWindowManagerV1,
-        event: <RiverWindowManagerV1 as Proxy>::Event,
-        _data: &(),
-        _conn: &Connection,
-        qh: &QueueHandle<Self>,
-    ) {
-        use river::river_window_manager_v1::Event;
-        match event {
-            Event::Unavailable => {
-                eprintln!("Error: Another WM is already running");
-                std::process::exit(1);
-            },
-            Event::Finished => {
 
-                std::process::exit(0);
-            },
-            Event::ManageStart => {
-                let river_xkb = state
-                    .river_xkb
-                    .as_ref()
-                    .expect("river_xkb_bindings_v1 missing");
-                state.wm.handle_manage_start(proxy, river_xkb, qh);
-            },
-            Event::RenderStart => state.wm.handle_render_start(proxy),
-            Event::SessionLocked => {},
-            Event::SessionUnlocked => {},
-            Event::Window { id } => state.wm.windows.push_back(Window::new(&state.wm, id, qh)),
-            Event::Output { id } => {
-                state.wm.focused_output = Some(id.id());
-                state.wm.outputs.insert(id.id(), Output::new(id));
-            },
-            Event::Seat { id } => {
-                state.wm.seats.insert(id.id(), Seat::new(id));
-            },
-        }
-    }
-
-    wayland_client::event_created_child!(AppData, RiverWindowManagerV1, [
-        river::river_window_manager_v1::EVT_WINDOW_OPCODE => (RiverWindowV1, ()),
-        river::river_window_manager_v1::EVT_OUTPUT_OPCODE => (RiverOutputV1, ()),
-        river::river_window_manager_v1::EVT_SEAT_OPCODE => (RiverSeatV1, ()),
-    ]);
-}
-
-impl Dispatch<RiverWindowV1, ()> for AppData {
-    fn event(
-        state: &mut Self,
-        proxy: &RiverWindowV1,
-        event: <RiverWindowV1 as Proxy>::Event,
-        _data: &(),
-        _conn: &Connection,
-        _qh: &QueueHandle<Self>,
-    ) {
-        use river::river_window_v1::Event;
-        let window = match state.wm.windows.iter_mut().find(|o| &o.proxy == proxy) {
-            Some(window) => window,
-            None => return,
-        };
-        match event {
-            Event::Closed => window.closed = true,
-            Event::DimensionsHint {
-                min_width: _,
-                min_height: _,
-                max_width: _,
-                max_height: _,
-            } => {}
-            Event::Dimensions { width, height } => (window.width, window.height) = (width, height),
-            Event::AppId { app_id: _ } => {},
-            Event::Title { title: _ } => {},
-            Event::Parent { parent: _ } => {},
-            Event::DecorationHint { hint } => {
-                window.pending_manage.decoration_hint = match hint.into_result() {
-                    Ok(val) => val,
-                    Err(_) => DecorationHint::NoPreference
-                }
-            },
-            Event::PointerMoveRequested { seat } => window.pointer_move_requested = Some(seat),
-            Event::PointerResizeRequested { seat, edges } => {
-                window.pointer_resize_requested = Some(seat);
-                window.pointer_resize_requested_edges =
-                    edges.into_result().expect("Invalid edges for resize");
-            },
-            Event::ShowWindowMenuRequested { x: _, y: _ } => {},
-            Event::MaximizeRequested => {},
-            Event::UnmaximizeRequested => {},
-            Event::FullscreenRequested { output: _ } => {},
-            Event::ExitFullscreenRequested => {},
-            Event::MinimizeRequested => {},
-            Event::UnreliablePid { unreliable_pid: _ } => {},
-            Event::PresentationHint { .. } => {},
-            Event::Identifier { .. } => {},
-            Event::CaptureSessions { count: _ } => {},
-            Event::TouchMoveRequested { seat: _, touch_point: _ } => {},
-            Event::TouchResizeRequested { seat: _, touch_point: _, edges: _ } => {},
-        }
-    }
-}
-
-impl Dispatch<RiverOutputV1, ()> for AppData {
-    fn event(
-        state: &mut Self,
-        proxy: &RiverOutputV1,
-        event: <RiverOutputV1 as Proxy>::Event,
-        _data: &(),
-        _conn: &Connection,
-        _qh: &QueueHandle<Self>,
-    ) {
-        use river::river_output_v1::Event;
-        let output = state
-            .wm
-            .outputs
-            .get_mut(&proxy.id())
-            .expect("Output not found");
-        match event {
-            Event::Removed => output.removed = true,
-            Event::WlOutput { name: _ } => {},
-            Event::Position {
-                x,
-                y,
-            } => {
-                (output.x, output.y) = (x, y);
-                eprintln!("x: {}, y: {}", x, y);
-            },
-            Event::Dimensions { 
-                width,
-                height,
-            } => {
-                (output.width, output.height) = (width, height);
-                eprintln!("width: {}, height: {}", width, height);
-            },
-            Event::CaptureSessions { count: _ } => {},
-        }
-    }
-}
 
 impl Dispatch<RiverSeatV1, ()> for AppData {
     fn event(
@@ -305,7 +168,11 @@ impl Dispatch<RiverXkbBindingV1, ObjectId> for AppData {
             .get(&proxy.id())
             .expect("xkb_binding not found");
         match event {
-            Event::Pressed => seat.pending_action = binding.action,
+            Event::Pressed => {
+                eprintln!("ACTION {:?}", binding.action);
+                seat.pending_action = binding.action;
+            },
+
             Event::Released => {}
             Event::StopRepeat => {}
         }

@@ -8,4 +8,3 @@ pub struct AppData {
     pub river_xkb: Option<RiverXkbBindingsV1>,
     pub wm: WindowManager,
 }
-

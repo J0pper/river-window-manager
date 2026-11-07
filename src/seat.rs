@@ -4,9 +4,9 @@ use wayland_backend::{ client::ObjectId };
 use wayland_client::{ Proxy, QueueHandle };
 
 
-use crate::river::{
+use crate::{action::{CanvasAction, CanvasFocus, Direction, OutputAction, OutputTarget, WindowAction, WindowFocus, WindowSwap}, river::{
     river_seat_v1::{Modifiers, RiverSeatV1}, river_window_manager_v1::RiverWindowManagerV1, river_window_v1::{Edges, RiverWindowV1}, river_xkb_bindings_v1::RiverXkbBindingsV1,
-};
+}, window_manager::WindowManager};
 
 use crate::action::Action;
 use crate::xkb_binding::XkbBinding;
@@ -89,52 +89,110 @@ impl Seat {
     }
 
     // handle pending actions from window seat
-    pub fn do_action(&mut self, windows: &mut VecDeque<Window>, wm_proxy: &RiverWindowManagerV1) {
+    pub fn do_action(&mut self, wm_proxy: &RiverWindowManagerV1, wm: &mut WindowManager) {
         match self.pending_action {
-            Action::None => {eprintln!("Action::None")},
+            Action::None => {},
+            
+            Action::Exit => {
+                wm_proxy.exit_session();
+            }
+
             // Don't pass WAYLAND_DEBUG on to children, the added noise makes
             // debugging the window manager itself impractical.
             Action::SpawnFoot => match std::process::Command::new("foot")
                 .env_remove("WAYLAND_DEBUG")
                 .spawn()
             {
-                // do nothing if spawned okay
-                Ok(_) => {eprintln!("Successfully spawned foot")},
-                // print if error occurred
+                Ok(_)  => eprintln!("Successfully spawned foot"),
                 Err(e) => eprintln!("Failed to spawn foot: {e}"),
             },
-            Action::Close => {
-                eprintln!("Closing window");
-                // find the proxy for the window focused by the seat
-                if let Some(window_proxy) = self.focused.as_ref() {
-                    window_proxy.close();
-                }
+
+            Action::Canvas(canvas_action) => match canvas_action {
+                CanvasAction::Focus(window_focus) => match window_focus {
+                    CanvasFocus::Direction(direction) => {
+                        wm.find_and_focus_canvas(direction);
+                    }
+                },
+                CanvasAction::Swap(window_swap) => match window_swap {
+                    WindowSwap::Direction(direction) => match direction {
+                        Direction::Up => {},
+                        Direction::Down => {},
+                        Direction::Left => {},
+                        Direction::Right => {},
+                    }
+                },
+                CanvasAction::Send(output_target) => match output_target {
+                    OutputTarget::Direction(direction) => match direction {
+                        Direction::Up => {},
+                        Direction::Down => {},
+                        Direction::Left => {},
+                        Direction::Right => {},
+                    }
+                },
+                CanvasAction::Zoom { scale: _ } => {  },
+                CanvasAction::Drill { step: _, id: _ } => {  },
+                CanvasAction::Rename => {  },
+                CanvasAction::Close(_canvas_id) => {  },
+                CanvasAction::CloseFocused => {  },
+                CanvasAction::Attach => {  },
+                CanvasAction::Detach => {  },
             },
-            Action::FocusNext => {
-                if !windows.is_empty() {
-                    windows.rotate_left(1);
-                    self.focus_top(windows);
+
+            Action::Output(output_action) => match output_action {
+                OutputAction::Focus(direction) => match direction {
+                    Direction::Up => {},
+                    Direction::Down => {},
+                    Direction::Left => {},
+                    Direction::Right => {},
                 }
-            },
-            Action::Move => {
-                if let (Some(window_proxy), SeatOp::None) = (self.hovered.as_ref(), &self.op) {
-                    let window = windows
-                        .iter()
-                        .find(|window| &window.proxy == window_proxy)
-                        .expect("Hovered window not found");
-                    self.pointer_move(window);
-                }
-            },
-            Action::Resize => {
-                if let (Some(window_proxy), SeatOp::None) = (self.hovered.as_ref(), &self.op) {
-                    let window = windows
-                        .iter()
-                        .find(|window| &window.proxy == window_proxy)
-                        .expect("Hovered window not found");
-                    self.pointer_resize(window, Edges::Bottom.union(Edges::Right));
-                }
-            },
-            Action::Exit => wm_proxy.exit_session(),
+            }
+
+
+
+            // Action::Close => {
+            //     eprintln!("Closing window");
+            //     // find the proxy for the window focused by the seat
+            //     if let Some(window_proxy) = self.focused.as_ref() {
+            //         window_proxy.close();
+            //     }
+            // },
+            //
+            // Action::Overview => {},
+            // Action::FocusNext => {},
+            // Action::Move => {},
+            // Action::Resize => {},
+            // Action::Overview => {
+            //     eprintln!("hello");
+            //     if let Some(window) = windows.back() {
+            //         if let (Some(width), Some(height)) = (window.default_width, window.default_height) {
+            //             window.proxy.propose_dimensions(width / 2, height / 2);
+            //         }
+            //     }
+            // }
+            // Action::FocusNext => {
+            //     if !windows.is_empty() {
+            //         windows.rotate_left(1);
+            //         self.focus_top(windows);
+            //     }
+            // },
+            // Action::Move => {
+            //     if let (Some(window_proxy), SeatOp::None) = (self.hovered.as_ref(), &self.op) {
+            //         let window = windows
+            //             .iter()
+            //             .find(|window| &window.proxy == window_proxy)
+            //             .expect("Hovered window not found");
+            //         self.pointer_move(window);
+            //     }
+            // },
+            // Action::Resize => {
+            //     if let (Some(window_proxy), SeatOp::None) = (self.hovered.as_ref(), &self.op) {
+            //         let window = windows
+            //             .iter()
+            //             .find(|window| &window.proxy == window_proxy)
+            //             .expect("Hovered window not found");
+            //         self.pointer_resize(window, Edges::Bottom.union(Edges::Right));
+            //     }
+            // },
         }
         self.pending_action = Action::None;
     }
@@ -195,6 +253,9 @@ impl Seat {
             }
         }
     }
+    pub fn focus(&mut self, window: &Window) {
+        self.proxy.focus_window(&window.proxy);
+    }
 
     pub fn pointer_move(&mut self, window: &Window) {
         // clone interacted window. Avoids borrowing.
@@ -202,11 +263,13 @@ impl Seat {
         // start interactive pointer operation. op_delta events are sent
         self.proxy.op_start_pointer();
         // set seats operation to move
-        self.op = SeatOp::Move {
-            window_proxy: window.proxy.clone(),
-            start_x: window.x,
-            start_y: window.y,
-        };
+        if let (Some(x), Some(y)) = (window.x, window.y) {
+            self.op = SeatOp::Move {
+                window_proxy: window.proxy.clone(),
+                start_x: x,
+                start_y: y,
+            };
+        }
         // set deltas to zero on op start
         self.op_dx = 0;
         self.op_dy = 0;
@@ -220,14 +283,16 @@ impl Seat {
         // inform window that it is being resized.
         // WM has the reponsibility to handle position and size
         window.proxy.inform_resize_start();
-        self.op = SeatOp::Resize {
-            window_proxy: window.proxy.clone(),
-            start_x: window.x,
-            start_y: window.y,
-            start_width: window.width,
-            start_height: window.height,
-            edges
-        };
+        if let (Some(width), Some(height), Some(x), Some(y)) = (window.width, window.height, window.x, window.y) {
+            self.op = SeatOp::Resize {
+                window_proxy: window.proxy.clone(),
+                start_x: x,
+                start_y: y,
+                start_width: width,
+                start_height: height,
+                edges
+            };
+        }
         // set deltas to zero on op start
         self.op_dx = 0;
         self.op_dy = 0;
